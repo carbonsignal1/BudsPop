@@ -19,6 +19,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let link = BudsLink()
     private var statusItem: NSStatusItem!
     private var popup: PopupController!
+    private var banner: PopupController!
+    private let bannerState = BannerState()
     private var observation: AnyCancellable?
 
     private var showOnConnect: Bool {
@@ -26,23 +28,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         set { UserDefaults.standard.set(newValue, forKey: "showOnConnect") }
     }
 
+    private var warnLowBattery: Bool {
+        get { UserDefaults.standard.bool(forKey: "warnLowBattery") }
+        set { UserDefaults.standard.set(newValue, forKey: "warnLowBattery") }
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
-        UserDefaults.standard.register(defaults: ["showOnConnect": true])
+        UserDefaults.standard.register(defaults: ["showOnConnect": true, "warnLowBattery": true])
         Log.write("BudsPop started")
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: "earbuds", accessibilityDescription: "Earbuds")
+            button.image = BudImages.menuBarIcon
+                ?? NSImage(systemSymbolName: "earbuds", accessibilityDescription: "Earbuds")
             button.imagePosition = .imageLeading
             button.target = self
             button.action = #selector(statusItemClicked(_:))
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
 
-        popup = PopupController(link: link)
+        popup = PopupController(link: link, placement: .topRight, cornerRadius: 26, autoHideDelay: 8) { [link] card in
+            PopupView(
+                link: link,
+                onClose: { [weak card] in card?.hide() },
+                onOpenBluetoothSettings: { [weak card] in
+                    card?.hide()
+                    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.BluetoothSettings")!)
+                }
+            )
+        }
+        // Connecting shows only the compact pill; clicking it opens the full card.
+        banner = PopupController(link: link, placement: .topRight, entrance: .drop,
+                                 cornerRadius: nil, autoHideDelay: 4) { [link, bannerState] pill in
+            ConnectedBanner(link: link, state: bannerState) { [weak self, weak pill] in
+                pill?.hide()
+                self?.popup.show(below: nil, autoHide: true)
+            }
+        }
         link.onAnnounce = { [weak self] in
             guard let self, self.showOnConnect else { return }
-            self.popup.show(below: nil, autoHide: true)
+            self.bannerState.kind = .connected
+            self.banner.show(below: nil, autoHide: true)
+        }
+        // If the "Connected" pill is up, it turns into the warning rather than stacking a second one.
+        link.onLowBattery = { [weak self] level in
+            guard let self, self.warnLowBattery else { return }
+            self.bannerState.kind = .lowBattery(level)
+            self.banner.show(below: nil, autoHide: true, hideAfter: 6)
         }
         observation = link.objectWillChange.sink { [weak self] _ in
             DispatchQueue.main.async { self?.refreshStatusItem() }
@@ -54,7 +86,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let launchEvent = NSAppleEventManager.shared().currentAppleEvent
         let launchedAtLogin = launchEvent?.paramDescriptor(forKeyword: keyAEPropData)?.enumCodeValue
             == keyAELaunchedAsLogInItem
-        if CommandLine.arguments.contains("--show") || !launchedAtLogin {
+        // Test pills wait a moment so they play after launch has settled.
+        if CommandLine.arguments.contains("--low-battery") {
+            bannerState.kind = .lowBattery(BatteryLevel(level: 15, charging: false))
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [self] in
+                banner.show(below: nil, autoHide: true, hideAfter: 6)
+            }
+        } else if CommandLine.arguments.contains("--banner") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [self] in
+                banner.show(below: nil, autoHide: true)
+            }
+        } else if CommandLine.arguments.contains("--show") || !launchedAtLogin {
             popup.show(below: nil, autoHide: true)
         }
     }
@@ -96,6 +138,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             statusItem.menu = nil
         } else {
             if !popup.isVisible, link.phase == .ready { link.refresh(full: false) }
+            banner.hide()
             popup.toggle(below: sender)
         }
     }
@@ -168,6 +211,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         showItem.state = showOnConnect ? .on : .off
         menu.addItem(showItem)
 
+        let lowItem = NSMenuItem(title: "Warn When Battery Is Low", action: #selector(toggleWarnLowBattery), keyEquivalent: "")
+        lowItem.target = self
+        lowItem.state = warnLowBattery ? .on : .off
+        menu.addItem(lowItem)
+
         let loginItem = NSMenuItem(title: "Open at Login", action: #selector(toggleLoginItem), keyEquivalent: "")
         loginItem.target = self
         loginItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
@@ -200,6 +248,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func toggleShowOnConnect() { showOnConnect.toggle() }
+    @objc private func toggleWarnLowBattery() { warnLowBattery.toggle() }
 
     @objc private func toggleLoginItem() {
         do {

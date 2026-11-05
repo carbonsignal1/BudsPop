@@ -106,6 +106,8 @@ final class BudsLink: NSObject, ObservableObject {
 
     /// Called once per connection, after the first battery report (or a short timeout).
     var onAnnounce: (() -> Void)?
+    /// Called when an earbud that isn't charging drops below 20%, and again at 10%.
+    var onLowBattery: ((BatteryLevel) -> Void)?
 
     private var connectNote: IOBluetoothUserNotification?
     private var disconnectNote: IOBluetoothUserNotification?
@@ -115,6 +117,8 @@ final class BudsLink: NSObject, ObservableObject {
     private var seq: UInt8 = 0
     private var pollTimer: Timer?
     private var announcePending = false
+    /// The warning threshold already shown (20 or 10); cleared once the earbuds are above 20% again.
+    private var lowBatteryWarned: Int?
     private var reopenAttempts = 0
     private var openingChannelID: BluetoothRFCOMMChannelID?
     private var channelVerified = false
@@ -239,6 +243,7 @@ final class BudsLink: NSObject, ObservableObject {
         caseIsLive = false
         inEar = nil
         lastError = nil
+        lowBatteryWarned = nil
     }
 
     private func announceIfPending() {
@@ -500,7 +505,7 @@ final class BudsLink: NSObject, ObservableObject {
                 Log.write("product id \(productID!)")
             }
         case 0x8106:
-            parseBattery(p)
+            parseBattery(p, isFullReport: true)
         case 0x8109:
             parseWearState(p)
         case 0x810C:
@@ -515,7 +520,7 @@ final class BudsLink: NSObject, ObservableObject {
         case 0x0204:
             // Pushed update: the first byte names the subscription, the rest matches the reply format.
             switch p.first {
-            case 0x01: parseBattery(p)
+            case 0x01: parseBattery(p, isFullReport: false)
             case 0x02: parseWearState(p)
             case 0x03: parseNoise(p)
             default: break
@@ -525,9 +530,15 @@ final class BudsLink: NSObject, ObservableObject {
         }
     }
 
-    private func parseBattery(_ p: [UInt8]) {
+    private func parseBattery(_ p: [UInt8], isFullReport: Bool) {
         guard p.count >= 4 else { return }
         let count = Int(p[1])
+        // An earbud in the case is left out of the reply; don't keep showing its old level.
+        if isFullReport {
+            let ids = stride(from: 2, to: min(p.count - 1, 2 + count * 2), by: 2).map { p[$0] }
+            if !ids.contains(1) { left = nil }
+            if !ids.contains(2) { right = nil }
+        }
         var i = 2
         while i + 1 < p.count, i < 2 + count * 2 {
             defer { i += 2 }
@@ -548,6 +559,20 @@ final class BudsLink: NSObject, ObservableObject {
             }
         }
         announceIfPending()
+        checkLowBattery()
+    }
+
+    private func checkLowBattery() {
+        let worn = [left, right].compactMap { $0 }.filter { !$0.charging }
+        guard let lowest = worn.min(by: { $0.level < $1.level }), lowest.level < 20 else {
+            lowBatteryWarned = nil
+            return
+        }
+        let threshold = lowest.level <= 10 ? 10 : 20
+        guard lowBatteryWarned.map({ threshold < $0 }) ?? true else { return }
+        lowBatteryWarned = threshold
+        Log.write("low battery: \(lowest.level)%")
+        onLowBattery?(lowest)
     }
 
     /// Payload: [0 or subscription type, count, (side, state)...]. Sides 1/2 are the buds, 3 the case.

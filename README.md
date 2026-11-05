@@ -1,22 +1,24 @@
 # BudsPop
 
-An AirPods-style pop-up for OnePlus, OPPO and realme earbuds on macOS. When your earbuds connect, a card slides in with battery levels and noise control. It also lives in the menu bar so you can bring it back any time.
+Control your OnePlus, OPPO and realme earbuds from your Mac. These buds are normally managed through the HeyMelody phone app; BudsPop brings the same controls to macOS: battery levels for each earbud and the case, noise cancellation modes and levels, and a heads-up when the buds connect or run low.
 
-Built and tested with **OnePlus Buds 4**. Other models that use the HeyMelody app's protocol may work too.
+Built and tested with **OnePlus Buds 4**. Other models that use the HeyMelody protocol may work too.
 
 ## Features
 
-- Pop-up card when the earbuds connect, which stays open while your pointer is over it
-- Battery rings for left, right and case, with charging indicators (the case shows its last known level when closed)
-- Noise control: Off, Transparency, Adaptive, Noise Cancellation
-- Noise cancellation level: Auto, Low, Moderate, High
-- Menu bar icon showing the lowest earbud battery; click for the card, right-click for the menu
-- Connect / Disconnect, device picker, Open at Login, and a debug log
+- **Battery:** left, right and case levels with charging indicators; the case keeps its last known level while closed
+- **Noise control:** Off, Transparency, Adaptive and Noise Cancellation
+- **Noise cancellation level:** Auto, Low, Moderate or High, shown while Noise Cancellation is on
+- **Connected pop-up:** a small pill drops down from the menu bar when the buds connect; click it for the full controls
+- **Low battery warning:** the pill comes back when an earbud that isn't charging drops below 20%, and again at 10%
+- **Menu bar:** an icon with the lowest earbud battery; click for the controls, right-click for the menu
+- **Menu:** noise modes and levels, Connect / Disconnect, choosing which earbuds, Open at Login, pop-up and warning switches, and a debug log
+- **Live updates:** changes made on the earbuds or in HeyMelody show up in BudsPop straight away
 
 ## Requirements
 
 - macOS 14 or later on Apple Silicon
-- Xcode Command Line Tools (`xcode-select --install`), Xcode itself isn't needed
+- Xcode Command Line Tools (`xcode-select --install`); Xcode itself isn't needed
 - Earbuds paired with the Mac in System Settings → Bluetooth
 
 ## Build and install
@@ -27,17 +29,29 @@ cp -R build/BudsPop.app ~/Applications/
 open ~/Applications/BudsPop.app
 ```
 
-On first launch macOS asks for Bluetooth access; allow it. Opening the app again (Finder, Spotlight or `open`) brings the card back.
+On first launch macOS asks for Bluetooth access; allow it.
 
 ## Usage
 
 | Action | What it does |
 | --- | --- |
-| Click the menu bar icon | Show or hide the card |
+| Earbuds connect | The Connected pill drops down for a few seconds |
+| Click the pill or the menu bar icon | Open the controls |
 | Right-click the menu bar icon | Noise modes, Connect/Disconnect, choose earbuds, settings |
-| Open the app while it's running | Show the card |
+| Open the app while it's running | Open the controls |
 
 By default the app picks any paired device whose name contains OnePlus, OPPO, Enco, realme or Dizo. Use **Earbuds** in the right-click menu to choose a specific one.
+
+For testing, `open ~/Applications/BudsPop.app --args --banner` shows the Connected pill at launch and `--low-battery` shows the warning (quit BudsPop first, since arguments only apply to a fresh launch).
+
+### Earbud images
+
+BudsPop can show photos of your earbuds and case in the pop-ups and controls, and builds the menu bar icon from the earbud outlines. The images aren't included in this repo. To use them, put transparent PNGs in `Resources/` before running `./build.sh`:
+
+- `bud-left.png` and `bud-right.png`: one earbud each, standing upright
+- `case.png`: the charging case
+
+Without them, BudsPop uses system symbols instead.
 
 ## How it works
 
@@ -72,14 +86,16 @@ Noise mode values on the Buds 4, checked by reading the mode back after each cha
 
 Values are 16-bit little-endian: values up to `0xFF` are sent as one byte, larger ones as two (Adaptive is `00 08`). In Auto the earbuds also report the strength they picked under config type 4.
 
+An earbud that's in the case is left out of the battery reply, so BudsPop shows it as unknown rather than keeping its old level.
+
 ## Known limitations
 
-- Some models only allow Noise Cancellation while both earbuds are worn; the card says so when the earbuds refuse a change.
+- Some models only allow Noise Cancellation while both earbuds are worn; the controls say so when the earbuds refuse a change.
 - Only tested on OnePlus Buds 4. If something doesn't work on your model, the debug log (right-click → Show Debug Log, or `~/Library/Logs/BudsPop.log`) records every frame sent and received.
 
 ## Credits
 
 - [oppo-pods](https://github.com/noctalia-dev/community-plugins/tree/main/oppo-pods) Noctalia plugin by osp54, for the frame format and command set
-- [Gadgetbridge](https://codeberg.org/Freeyourgadget/Gadgetbridge), for the noise-mode values, wear state and subscription commands
+- [Gadgetbridge](https://codeberg.org/Freeyourgadget/Gadgetbridge), for the wear state and subscription commands
 
 Not affiliated with OnePlus, OPPO or realme.

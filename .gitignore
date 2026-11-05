@@ -1,3 +1,5 @@
 .DS_Store
 build/
 probe/
+# Earbud photos stay local; see Resources/README.md.
+Resources/*.png
