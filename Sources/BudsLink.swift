@@ -28,9 +28,10 @@ enum NoiseMode: String, CaseIterable, Identifiable {
 
     var commandByte: UInt8 {
         switch self {
+        // Verified on the Buds 4 by reading the mode back after each change.
         case .off: 0x01
-        case .transparency: 0x02
-        case .anc: 0x08
+        case .transparency: 0x04
+        case .anc: 0x02
         }
     }
 }
@@ -520,14 +521,17 @@ final class BudsLink: NSObject, ObservableObject {
         Log.write("wear state \(Log.hex(buds)) -> in ear: \(inEar!)")
     }
 
-    /// Payload: [0 or subscription type, config type, 0x01, value, ...]; only type 1 (mode) is used.
+    /// Payload: [0 or subscription type, config type, 0x01, value lo, value hi]; only type 1 (mode) is used.
+    /// The reported value differs from the one that was set: Off reads back as 0x0008,
+    /// Noise Cancellation as a strength level (0x0010 etc.) and Transparency as 0x0100.
     private func parseNoise(_ p: [UInt8]) {
         guard p.count >= 4, p[1] == 0x01 else { return }
-        switch p[3] {
-        case 0x01: noiseMode = .off
-        case 0x02: noiseMode = .transparency
-        case 0x04, 0x08, 0x10, 0x20: noiseMode = .anc  // ANC strength levels
-        default: Log.write("unknown noise mode 0x\(String(format: "%02X", p[3]))")
+        let value = UInt16(p[3]) | (p.count > 4 ? UInt16(p[4]) << 8 : 0)
+        switch value {
+        case 0x0001, 0x0008: noiseMode = .off
+        case 0x0004, 0x0100: noiseMode = .transparency
+        case 0x0002, 0x0010, 0x0020, 0x0040, 0x0080: noiseMode = .anc
+        default: Log.write("unknown noise mode 0x\(String(format: "%04X", value))")
         }
     }
 }

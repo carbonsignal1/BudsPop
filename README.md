@@ -56,7 +56,15 @@ AA <len> 00 00 <cmd lo> <cmd hi> <seq> <payload len lo> <payload len hi> <payloa
 | `0x0404` → `0x8404` | Set noise mode `[01 01 value]`; ack byte 0 = accepted |
 | `0x0205` | Subscribe to pushed updates (`0x0204`) for battery, wear state and noise mode |
 
-Noise mode values: `01` Off, `02` Transparency, `08` Noise Cancellation (`04`/`10`/`20` are ANC strength levels).
+Noise mode values on the Buds 4, checked by reading the mode back after each change:
+
+| Mode | Set with | Reported as |
+| --- | --- | --- |
+| Off | `01` | `0x0008` |
+| Noise Cancellation | `02` | `0x0010` (a strength level) |
+| Transparency | `04` | `0x0100` |
+
+The reported value is 16-bit little-endian, so Transparency arrives as the bytes `00 01`.
 
 ## Known limitations
 
