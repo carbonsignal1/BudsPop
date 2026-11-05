@@ -2,11 +2,12 @@ import Foundation
 import IOBluetooth
 
 // Talks to OnePlus / OPPO / realme earbuds over their vendor RFCOMM channel.
-// Frame format follows the oppo-pods Noctalia plugin; command and value codes follow
-// Gadgetbridge's OPPO headphones support (service/devices/oppo).
+// Frame format follows the oppo-pods Noctalia plugin; the subscription and wear-state commands
+// follow Gadgetbridge's OPPO headphones support. Noise-mode codes were verified on the
+// OnePlus Buds 4 by reading the mode back after each change.
 
 enum NoiseMode: String, CaseIterable, Identifiable {
-    case off, transparency, anc
+    case off, transparency, adaptive, anc
 
     var id: String { rawValue }
 
@@ -14,6 +15,7 @@ enum NoiseMode: String, CaseIterable, Identifiable {
         switch self {
         case .off: "Off"
         case .transparency: "Transparency"
+        case .adaptive: "Adaptive"
         case .anc: "Noise Cancellation"
         }
     }
@@ -22,16 +24,43 @@ enum NoiseMode: String, CaseIterable, Identifiable {
         switch self {
         case .off: "circle.slash"
         case .transparency: "ear.badge.waveform"
+        case .adaptive: "circle.lefthalf.filled"
         case .anc: "waveform.slash"
         }
     }
 
-    var commandByte: UInt8 {
+    /// Value sent to switch modes. Noise Cancellation returns to whichever level was last used.
+    var setValue: UInt16 {
         switch self {
-        // Verified on the Buds 4 by reading the mode back after each change.
-        case .off: 0x01
-        case .transparency: 0x04
-        case .anc: 0x02
+        case .off: 0x0001
+        case .transparency: 0x0004
+        case .adaptive: 0x0800
+        case .anc: 0x0002
+        }
+    }
+}
+
+/// Noise-cancellation strength. The same code is used to set it and is reported back.
+enum AncLevel: String, CaseIterable, Identifiable {
+    case auto, low, moderate, high
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .auto: "Auto"
+        case .low: "Low"
+        case .moderate: "Moderate"
+        case .high: "High"
+        }
+    }
+
+    var value: UInt16 {
+        switch self {
+        case .auto: 0x0080  // the earbuds adjust the strength themselves in this mode
+        case .low: 0x0040
+        case .moderate: 0x0020
+        case .high: 0x0010
         }
     }
 }
@@ -69,6 +98,7 @@ final class BudsLink: NSObject, ObservableObject {
     @Published private(set) var caseBattery: BatteryLevel?
     @Published private(set) var caseIsLive = false
     @Published private(set) var noiseMode: NoiseMode?
+    @Published private(set) var ancLevel: AncLevel?
     @Published private(set) var productID: String?
     /// nil until the earbuds report wear state; newer models only accept mode changes while worn.
     @Published private(set) var inEar: Bool?
@@ -205,6 +235,7 @@ final class BudsLink: NSObject, ObservableObject {
         channel = nil
         buffer.removeAll()
         noiseMode = nil
+        ancLevel = nil
         caseIsLive = false
         inEar = nil
         lastError = nil
@@ -393,7 +424,22 @@ final class BudsLink: NSObject, ObservableObject {
         guard canChangeNoiseMode else { return }
         lastError = nil
         noiseMode = mode
-        sendSequence([(0x0404, [0x01, 0x01, mode.commandByte])])
+        sendNoiseValue(mode.setValue)
+    }
+
+    func setAncLevel(_ level: AncLevel) {
+        guard canChangeNoiseMode else { return }
+        lastError = nil
+        noiseMode = .anc
+        ancLevel = level
+        sendNoiseValue(level.value)
+    }
+
+    /// Values above 0xFF go out as two little-endian bytes (Adaptive is 0x0800).
+    private func sendNoiseValue(_ value: UInt16) {
+        var payload: [UInt8] = [0x01, 0x01, UInt8(value & 0xFF)]
+        if value > 0xFF { payload.append(UInt8(value >> 8)) }
+        sendSequence([(0x0404, payload)])
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
             self?.sendSequence([(0x010C, [0x01, 0x01])])
         }
@@ -522,15 +568,21 @@ final class BudsLink: NSObject, ObservableObject {
     }
 
     /// Payload: [0 or subscription type, config type, 0x01, value lo, value hi]; only type 1 (mode) is used.
-    /// The reported value differs from the one that was set: Off reads back as 0x0008,
-    /// Noise Cancellation as a strength level (0x0010 etc.) and Transparency as 0x0100.
+    /// The reported value can differ from the one that was set: Off reads back as 0x0008 and
+    /// Transparency as 0x0100 or 0x0200; Noise Cancellation reads back as its level.
     private func parseNoise(_ p: [UInt8]) {
         guard p.count >= 4, p[1] == 0x01 else { return }
         let value = UInt16(p[3]) | (p.count > 4 ? UInt16(p[4]) << 8 : 0)
+        if let level = AncLevel.allCases.first(where: { $0.value == value }) {
+            noiseMode = .anc
+            ancLevel = level
+            return
+        }
         switch value {
         case 0x0001, 0x0008: noiseMode = .off
-        case 0x0004, 0x0100: noiseMode = .transparency
-        case 0x0002, 0x0010, 0x0020, 0x0040, 0x0080: noiseMode = .anc
+        case 0x0004, 0x0100, 0x0200: noiseMode = .transparency
+        case 0x0800: noiseMode = .adaptive
+        case 0x0002: noiseMode = .anc
         default: Log.write("unknown noise mode 0x\(String(format: "%04X", value))")
         }
     }
@@ -545,6 +597,7 @@ extension BudsLink {
         caseBattery = BatteryLevel(level: 64, charging: true)
         caseIsLive = true
         noiseMode = .anc
+        ancLevel = .moderate
     }
 }
 #endif

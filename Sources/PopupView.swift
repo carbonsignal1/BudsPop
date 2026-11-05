@@ -16,10 +16,13 @@ struct PopupView: View {
 
     private var statusLine: String {
         switch link.phase {
-        case .disconnected: "Not connected"
-        case .connecting: "Connecting…"
-        case .ready: link.noiseMode.map { "Connected · \($0.title)" } ?? "Connected"
-        case .unavailable: "Connected · controls unavailable"
+        case .disconnected: return "Not connected"
+        case .connecting: return "Connecting…"
+        case .ready:
+            guard let mode = link.noiseMode else { return "Connected" }
+            if mode == .anc, let level = link.ancLevel { return "Connected · \(mode.title) · \(level.title)" }
+            return "Connected · \(mode.title)"
+        case .unavailable: return "Connected · controls unavailable"
         }
     }
 
@@ -39,7 +42,7 @@ struct PopupView: View {
         .padding(.horizontal, 20)
         .padding(.top, 18)
         .padding(.bottom, 14)
-        .frame(width: 340)
+        .frame(width: 372)
         .onAppear {
             withAnimation(.spring(response: 0.5, dampingFraction: 0.65).delay(0.05)) { appeared = true }
         }
@@ -79,12 +82,20 @@ struct PopupView: View {
     }
 
     private var noiseControl: some View {
-        HStack(spacing: 6) {
-            ForEach(NoiseMode.allCases) { mode in
-                ModeButton(mode: mode, selected: link.noiseMode == mode) {
-                    withAnimation(.snappy) { link.setNoiseMode(mode) }
+        VStack(spacing: 10) {
+            HStack(spacing: 4) {
+                ForEach(NoiseMode.allCases) { mode in
+                    ModeButton(mode: mode, selected: link.noiseMode == mode) {
+                        withAnimation(.snappy) { link.setNoiseMode(mode) }
+                    }
                 }
             }
+            // Always laid out so the card keeps its size; only active in Noise Cancellation.
+            LevelPicker(selected: link.noiseMode == .anc ? link.ancLevel : nil) { level in
+                withAnimation(.snappy) { link.setAncLevel(level) }
+            }
+            .disabled(link.noiseMode != .anc)
+            .opacity(link.noiseMode == .anc ? 1 : 0.4)
         }
         .padding(8)
         .background(.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -198,6 +209,7 @@ struct ModeButton: View {
                     .font(.caption)
                     .multilineTextAlignment(.center)
                     .lineLimit(2, reservesSpace: true)
+                    .minimumScaleFactor(0.85)
                     .foregroundStyle(selected ? .primary : .secondary)
             }
             .frame(maxWidth: .infinity)
@@ -206,5 +218,34 @@ struct ModeButton: View {
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+struct LevelPicker: View {
+    let selected: AncLevel?
+    let action: (AncLevel) -> Void
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(AncLevel.allCases) { level in
+                let isSelected = selected == level
+                Button { action(level) } label: {
+                    Text(level.title)
+                        .font(.caption.weight(isSelected ? .semibold : .regular))
+                        .foregroundStyle(isSelected ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 5)
+                        .background(
+                            Capsule().fill(isSelected ? AnyShapeStyle(Color.accentColor)
+                                                      : AnyShapeStyle(.primary.opacity(0.06)))
+                        )
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Noise cancellation level")
     }
 }

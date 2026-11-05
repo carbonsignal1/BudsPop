@@ -8,7 +8,8 @@ Built and tested with **OnePlus Buds 4**. Other models that use the HeyMelody ap
 
 - Pop-up card when the earbuds connect, which stays open while your pointer is over it
 - Battery rings for left, right and case, with charging indicators (the case shows its last known level when closed)
-- Noise control: Off, Transparency, Noise Cancellation
+- Noise control: Off, Transparency, Adaptive, Noise Cancellation
+- Noise cancellation level: Auto, Low, Moderate, High
 - Menu bar icon showing the lowest earbud battery; click for the card, right-click for the menu
 - Connect / Disconnect, device picker, Open at Login, and a debug log
 
@@ -56,15 +57,20 @@ AA <len> 00 00 <cmd lo> <cmd hi> <seq> <payload len lo> <payload len hi> <payloa
 | `0x0404` → `0x8404` | Set noise mode `[01 01 value]`; ack byte 0 = accepted |
 | `0x0205` | Subscribe to pushed updates (`0x0204`) for battery, wear state and noise mode |
 
-Noise mode values on the Buds 4, checked by reading the mode back after each change:
+Noise mode values on the Buds 4, checked by reading the mode back after each change and against HeyMelody:
 
 | Mode | Set with | Reported as |
 | --- | --- | --- |
-| Off | `01` | `0x0008` |
-| Noise Cancellation | `02` | `0x0010` (a strength level) |
-| Transparency | `04` | `0x0100` |
+| Off | `0x0001` | `0x0008` |
+| Transparency | `0x0004` | `0x0100` (sometimes `0x0200`) |
+| Adaptive | `0x0800` | `0x0800` |
+| Noise Cancellation (last used level) | `0x0002` | the level's code |
+| Noise Cancellation – Auto | `0x0080` | `0x0080` |
+| Noise Cancellation – Low | `0x0040` | `0x0040` |
+| Noise Cancellation – Moderate | `0x0020` | `0x0020` |
+| Noise Cancellation – High | `0x0010` | `0x0010` |
 
-The reported value is 16-bit little-endian, so Transparency arrives as the bytes `00 01`.
+Values are 16-bit little-endian: values up to `0xFF` are sent as one byte, larger ones as two (Adaptive is `00 08`). In Auto the earbuds also report the strength they picked under config type 4.
 
 ## Known limitations
 

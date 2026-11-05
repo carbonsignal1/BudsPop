@@ -119,6 +119,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if !link.canChangeNoiseMode { item.action = nil }
                 menu.addItem(item)
             }
+            if link.noiseMode == .anc {
+                for level in AncLevel.allCases {
+                    let item = NSMenuItem(title: level.title, action: #selector(selectAncLevel(_:)), keyEquivalent: "")
+                    item.target = self
+                    item.representedObject = level.rawValue
+                    item.state = link.ancLevel == level ? .on : .off
+                    item.indentationLevel = 1
+                    if !link.canChangeNoiseMode { item.action = nil }
+                    menu.addItem(item)
+                }
+            }
         }
         menu.addItem(.separator())
 
@@ -174,6 +185,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func selectNoiseMode(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String, let mode = NoiseMode(rawValue: raw) else { return }
         link.setNoiseMode(mode)
+    }
+
+    @objc private func selectAncLevel(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String, let level = AncLevel(rawValue: raw) else { return }
+        link.setAncLevel(level)
     }
 
     @objc private func connect() { link.connect() }
